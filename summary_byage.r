@@ -16,34 +16,32 @@ library(shiny)
 library(gtools)
 udata=NULL
 
-ui=shinyUI(fluidPage(
-  fluidRow(
-    h4('Upload file'),
-    fileInput('file1',' Choose CSV File', accept=c('csv','.csv')),
-    tags$hr(),
-    h4(' Identify the following variable(s) in your dataset:')
-  ),
-  fluidRow(
-    
-    column(2,
-           selectInput("teid",label=h5("TEID"),"") 
+ui=shinyUI(navbarPage('Toolbox',
+  tabPanel('File',
+    sidebarLayout(
+      sidebarPanel(
+        h5('Upload file'),
+        fileInput('file1',label=h5('Choose CSV File'), accept=c('csv','.csv')),
+        h5(' Identify the following variable(s) in your dataset:'),
+        selectInput("teid",label=h5("TEID"),"") ,
+        selectInput("age", label=h5("Age group"),""),
+        selectInput("clin", label=h5("Clinical group"),""),
+        selectizeInput('vars',label=h5("Item scores"),"",multi=T),
+        actionButton('submit','Submit specification',icon=icon('upload'))
+        ),
+      mainPanel(
+        h4('Data summary'),
+        tableOutput('summ')
+        )
+      )
     ),
-    column(2,
-           selectInput("age", label=h5("Age group"),"")
+  tabPanel('Check case'
     ),
-    column(2,
-           selectInput("clin", label=h5("Clinical group?"),"")
-    ),
-    column(6,
-           selectizeInput('vars',label=h5("Item scores"),"",multi=T),
-           actionButton('submit','Submit specification',icon=icon('upload'))
+  tabPanel('Item selection'),
+  navbarMenu('Score change',
+    tabPanel('code-based'),
+    tabPanel('teid-based')
     )
-  ),
-  fluidRow(
-    tags$hr(),
-    h4('Data summary'),
-    tableOutput('summ')
-  )
 ))
 
 server<-shinyServer(function(input, output, session) {
