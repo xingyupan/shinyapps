@@ -40,7 +40,15 @@ ui=shinyUI(navbarPage('Toolbox',
   tabPanel('Item selection'),
   navbarMenu('Score change',
     tabPanel('code-based'),
-    tabPanel('teid-based')
+    tabPanel('teid-based',
+      fluidRow(
+        h4('Conduct Change'),
+        actionButton("tch","add"),
+        htmlOutput("multiInputs") 
+      ),
+      
+      fluidRow(h4('Effect'))
+      )
     )
 ))
 
@@ -66,36 +74,54 @@ server<-shinyServer(function(input, output, session) {
 	updateSelectizeInput(session,'vars',choices=names(udata()))
   })
   
+  id<-reactive({
+    d<-udata()
+    d[,input$teid]
+    })
   age<-reactive({
     d<-udata()
     d[,input$age]
   })
   clingrp<-reactive({
-	d<-udata()
-	d[,input$clin]
+    d<-udata()
+    d[,input$clin]
   })
   isclin<-reactive({
-	!is.na(clingrp())
+    !is.na(clingrp())
   })
   scores<-reactive({
-	d<-udata()
-	d[,input$vars]
+  	d<-udata()
+  	d[,input$vars]
   })
   output$summ<-renderTable({
-	if (is.null(input$submit) | (input$submit==0)) return(NULL)
-	isolate({
-		aa<-age(); aa[isclin()]=clingrp()[isclin()]
-		ss<-scores(); ss.k<-split(ss,aa)
-		rawt<-rowSums(ss,na.rm=T); rawt.k<-split(rawt,aa)
- 		N<-table(aa)
-		alpha<-sapply(ss.k,FUN=rel)
-		means<-sapply(rawt.k,mean)
-		ranges<-sapply(rawt.k,range)
-		tt<-rbind(N,means,ranges[1,],ranges[2,],alpha)
-    row.names(tt)<-c("N","Ave raw score","Min raw score","Max raw score","alpha")
-    tt<-tt[,mixedorder(colnames(tt))]
-    tt
-	})		
+  	if (is.null(input$submit) | (input$submit==0)) return(NULL)
+  	isolate({
+  		aa<-age(); aa[isclin()]=clingrp()[isclin()]
+  		ss<-scores(); ss.k<-split(ss,aa)
+  		rawt<-rowSums(ss,na.rm=T); rawt.k<-split(rawt,aa)
+   		N<-table(aa)
+  		alpha<-sapply(ss.k,FUN=rel)
+  		means<-sapply(rawt.k,mean)
+  		ranges<-sapply(rawt.k,range)
+  		tt<-rbind(N,means,ranges[1,],ranges[2,],alpha)
+      row.names(tt)<-c("N","Ave raw score","Min raw score","Max raw score","alpha")
+      tt<-tt[,mixedorder(colnames(tt))]
+      tt
+  	})		
   })
+  output$multiInputs<-renderUI({
+    if (is.null(input$tch) | input$tch==0) return()
+    w=''
+    for (i in c(1:input$tch)) {
+      w<-paste(w,
+        div(style="display:inline-block",
+          selectInput(paste('tch_item',i,sep=""),label='item',choices=names(scores()),selected=input[[sprintf('tch_item%d',i)]])),
+        div(style="display:inline-block",
+          numericInput(paste('tch_score',i,sep=''),label='score',value=input[[sprintf('tch_score%d',i)]])),
+        div(style="display:inline-block",
+          selectizeInput(paste('tch_id',i,sep=''),label='TEID',choices=id(),multi=T,selected=input[[sprintf('tch_id%d',i)]])))
+    }
+    HTML(w)
+    })
 })
 runApp(list(ui=ui,server=server))
