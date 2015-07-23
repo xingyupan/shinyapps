@@ -96,10 +96,10 @@ ui=shinyUI(navbarPage('Toolbox',
                       ),
                       tabPanel('Item selection',
                                ####### Select Item ######
-                               div(style='display:inline-block;width:200px',
-                                   numericInput('ndrop','Total number of items to drop',value=0)),
+                               div(style='display:inline-block;width:200px; vertical-align:top',
+                                   numericInput('ndrop','Total # of items to drop',value=0)),
                                div(style='display:inline-block',
-                                 selectizeInput('keyclin','Specify key clinical groups',choices='',multi=T,width='200px')),
+                                   selectizeInput('keyclin','Specify key clinical groups',choices='',multi=T,width='200px')),
                                htmlOutput('logreg'),
                                h5('Items to keep'),
                                div(style='display:inline-block',
@@ -121,18 +121,22 @@ ui=shinyUI(navbarPage('Toolbox',
                                    selectizeInput('d4','Other drops',choices='',multi=T,width='200px')),
                                tags$br(),
                                div(style="display:inline-block",actionButton("est","Estimate time")),
-                               div(style="display:inline-block",actionButton("cal","Calculate"))
+                               div(style="display:inline-block",actionButton("cal","Calculate")),
+                               ####### display results #####
+                               textOutput('estim')
                       ),
                       navbarMenu('Score change',
                                  tabPanel('code-based'),
                                  tabPanel('teid-based',
                                           fluidRow(
-                                            h4('Conduct Change'),
-                                            div(style="display:inline-block",actionButton("tch","add")),
+                                            div(style='padding:0px 5px', h4('Conduct Change')),
+                                            div(style="display:inline-block; padding:0px 10px",actionButton("tch","add")),
                                             div(style="display:inline-block",actionButton("tch_rm","remove")),
                                             htmlOutput("multiInputs") 
                                           ),
-                                          fluidRow(h4('Effect'))
+                                          fluidRow(
+                                            div(style='padding:0px 5px',h4('Effect'))
+                                          )
                                  )
                       )
 ))
@@ -180,6 +184,19 @@ server<-shinyServer(function(input, output, session) {
     dx[,mixedorder(colnames(dx))]
   })
   
+  observeEvent(input$submit, {
+    updateSelectizeInput(session,'keyclin',choices=unique(clingrp()))
+    updateSelectizeInput(session,'k1',choices=names(scores()))
+    updateSelectizeInput(session,'k2',choices=names(scores()))
+    updateSelectizeInput(session,'k3',choices=names(scores()))
+    updateSelectizeInput(session,'k4',choices=names(scores()))
+    updateSelectizeInput(session,'d1',choices=names(scores()))
+    updateSelectizeInput(session,'d1',choices=names(scores()))
+    updateSelectizeInput(session,'d2',choices=names(scores()))
+    updateSelectizeInput(session,'d3',choices=names(scores()))
+    updateSelectizeInput(session,'d4',choices=names(scores()))    
+  })
+  
   ##### Main tab: producing a summary of user data ######
   output$summ<-renderTable({
     if (is.null(input$submit) | (input$submit==0)) return(NULL)
@@ -196,7 +213,7 @@ server<-shinyServer(function(input, output, session) {
       row.names(tt)<-c("N","Ave raw score","Effective items","Min raw score","Max raw score","alpha")
       tt<-tt[,mixedorder(colnames(tt))]
       tt
-    })    
+    })  	
   })
   ##### Check case tab: check outlier ####
   #### check outlier ####
@@ -224,7 +241,47 @@ server<-shinyServer(function(input, output, session) {
     colnames(dx)[1:3]=c("TEID","AgeGroup","ClinGroup")
     dx[id() %in% check.o(),]
   })
+  #### Item select tab: calculate critical item ####
+  #### Item select tab: estimate calc time ####
+  k1<-reactive({ input$k1 })
+  k2<-reactive({ input$k2 })
+  k3<-reactive({ input$k3 })
+  k4<-reactive({ input$k4 })
+  d1 <- reactive({ input$d1 })
+  d2<- reactive({ input$d2 })
+  d3<-reactive({input$d3})
+  d4<-reactive({input$d4})
+  key.clin<-reactive({input$keyclin})
+  ndrop<-reactive({input$ndrop})
+  ntot<-reactive({ dim(scores())[2] })
+  keeps<-reactive({ unique(c(k1(),k2(),k3(),k4())) })
+  drops<-reactive({unique(c(d1(),d2(),d3(),d4())) })
   
+  etime <- eventReactive(input$est, {
+    ntot<-ntot()-length(keeps())
+    ndel<-ndrop()-length(drops())
+    choose(ntot,ndel)
+  })
+  mins<- reactive({etime()/400})
+  output$estim<-renderText({
+    if (mins()>30) {
+      paste("Dropping",ndrop()-length(drops()),
+            "from a total of",ntot()-length(keeps()) ,
+            "items. It take approximately",mins(),"min to calculate all solutions.",
+            "Please add more constraints to reduce your calculation time")
+    } else if (mins()>5) {
+      paste("Dropping",ndrop()-length(drops()),
+            "from a total of",ntot()-length(keeps()) ,
+            "items. It take approximately",mins(),"min to calculate all solutions.",
+            "Go grab a coffee after you hit that Calculate button!")
+      
+    } else {
+      paste("Dropping",ndrop()-length(drops()),
+            "from a total of",ntot()-length(keeps()) ,
+            "items. It will take approximately",mins(),"min to calculate all solutions")
+    }
+  })
+  #### Item select Tab: calculate solutions ####
   ##### Score change tab: dynamic UI ######
   output$multiInputs<-renderUI({
     if (is.null(input$tch) | input$tch==0) return()
@@ -237,9 +294,9 @@ server<-shinyServer(function(input, output, session) {
     if (nch<1) return()
     for (i in c(1:nch)) {
       w<-paste(w,
-               div(style="display:inline-block",
+               div(style="display:inline-block; padding: 0px 10px; width:150px",
                    selectInput(paste('tch_item',i,sep=""),label='Item',choices=names(scores()),selected=input[[sprintf('tch_item%d',i)]])),
-               div(style="display:inline-block",
+               div(style="display:inline-block;width:100px; vertical-align:top",
                    numericInput(paste('tch_score',i,sep=''),label='Score',value=input[[sprintf('tch_score%d',i)]])),
                div(style="display:inline-block",
                    selectizeInput(paste('tch_id',i,sep=''),label='TEID',choices=id(),multi=T,selected=input[[sprintf('tch_id%d',i)]])),
@@ -247,5 +304,7 @@ server<-shinyServer(function(input, output, session) {
     }
     HTML(w)
   })
+  
+  ##### Score change tab: display score change effect ####
 })
 runApp(list(ui=ui,server=server))
