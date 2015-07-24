@@ -56,6 +56,7 @@ aftereffect=function(nremoval,optionalitem,delete,age,scores) {
 }
 
 library(shiny)
+library(stringr)
 library(gtools)
 udata=NULL
 
@@ -100,6 +101,7 @@ ui=shinyUI(navbarPage('Toolbox',
                                    numericInput('ndrop','Total # of items to drop',value=0)),
                                div(style='display:inline-block',
                                    selectizeInput('keyclin','Specify key clinical groups',choices='',multi=T,width='200px')),
+                               actionButton('log','Show sensitive items',icon=icon('star')),
                                htmlOutput('logreg'),
                                h5('Items to keep'),
                                div(style='display:inline-block',
@@ -123,7 +125,8 @@ ui=shinyUI(navbarPage('Toolbox',
                                div(style="display:inline-block",actionButton("est","Estimate time")),
                                div(style="display:inline-block",actionButton("cal","Calculate")),
                                ####### display results #####
-                               textOutput('estim')
+                               textOutput('estim'),
+                               dataTableOutput('sol')
                       ),
                       navbarMenu('Score change',
                                  tabPanel('code-based'),
@@ -185,7 +188,7 @@ server<-shinyServer(function(input, output, session) {
   })
   
   observeEvent(input$submit, {
-    updateSelectizeInput(session,'keyclin',choices=unique(clingrp()))
+    updateSelectizeInput(session,'keyclin',choices=unique(as.character(clingrp())))
     updateSelectizeInput(session,'k1',choices=names(scores()))
     updateSelectizeInput(session,'k2',choices=names(scores()))
     updateSelectizeInput(session,'k3',choices=names(scores()))
@@ -242,7 +245,7 @@ server<-shinyServer(function(input, output, session) {
     dx[id() %in% check.o(),]
   })
   #### Item select tab: calculate critical item ####
-  #### Item select tab: estimate calc time ####
+
   k1<-reactive({ input$k1 })
   k2<-reactive({ input$k2 })
   k3<-reactive({ input$k3 })
@@ -251,12 +254,51 @@ server<-shinyServer(function(input, output, session) {
   d2<- reactive({ input$d2 })
   d3<-reactive({input$d3})
   d4<-reactive({input$d4})
-  key.clin<-reactive({input$keyclin})
+  key.clin<-reactive({as.character(input$keyclin)})
   ndrop<-reactive({input$ndrop})
   ntot<-reactive({ dim(scores())[2] })
   keeps<-reactive({ unique(c(k1(),k2(),k3(),k4())) })
   drops<-reactive({unique(c(d1(),d2(),d3(),d4())) })
-  
+  fvars<-eventReactive(input$log,{
+    nclin<-length(key.clin())
+    x<-NULL
+    for (i in 1:nclin) {
+      clinx<-key.clin()[i]
+      y<-as.character(clingrp())
+      y[is.na(y)]="Non"
+      y[!y %in% c(clinx,"Non")]=NA
+      logi.non<-glm(as.factor(y)~1, family=binomial, data=scores())
+      logi.full<-glm(as.factor(y)~., family=binomial, data=scores())
+      both<-step(logi.non,scope=list(lower=formula(logi.non),upper=formula(logi.full)),
+                 direction='both',trace=0)
+      flog<-formula(both)
+      flog<-as.character(flog)[3]
+      ff<-strsplit(flog," [+] ")[[1]]
+      x[[i]]<-ff
+    }
+    print(x)
+    x
+  })
+  output$logreg<-renderText({
+    if (input$log==0 | is.null(input$log)) return() 
+    vv=""
+    nl<-dim(fvars())[1]
+    for (i in c(1:nl)){
+      kk<-str_c(fvars()[[i]],collapse=" ")
+      vv=paste(vv, "Following variables are highly sensitive differentiating ",key.clin()[i]," from non-clinicals.<br/>",kk,'<br/>',sep="")
+    }
+    x<-cor(scores(),use="complete.obs")
+    diags<-which(x==1); all<-which(x>0.6)
+    all<-all[! all %in% diags]; n<-dim(scores())[2]
+    r<-all %/% n +1
+    c<- all %% n; c[c==0]=n; r[c==n]=r[c==n]-1
+    ## figure out item pairs whose correlation is higher than .6
+    ps<-paste(r,c); ps<-str_c(ps,collapse="),(")
+    vv<-paste(vv,"The following item pairs has a correlation higher than 0.6: <br/>(", ps,
+      ") <br/> Check for possible redundancy.",sep="")
+    HTML(vv)
+  })
+  #### Item select tab: estimate calc time ####
   etime <- eventReactive(input$est, {
     ntot<-ntot()-length(keeps())
     ndel<-ndrop()-length(drops())
@@ -294,7 +336,7 @@ server<-shinyServer(function(input, output, session) {
     if (nch<1) return()
     for (i in c(1:nch)) {
       w<-paste(w,
-               div(style="display:inline-block; padding: 0px 10px; width:150px",
+               div(style="display:inline-block; padding: 0px 10px; width:150px; vertical-align:top",
                    selectInput(paste('tch_item',i,sep=""),label='Item',choices=names(scores()),selected=input[[sprintf('tch_item%d',i)]])),
                div(style="display:inline-block;width:100px; vertical-align:top",
                    numericInput(paste('tch_score',i,sep=''),label='Score',value=input[[sprintf('tch_score%d',i)]])),
