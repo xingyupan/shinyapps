@@ -27,31 +27,27 @@ outliercheck=function(alphachange,teid,scores){
   outs=teid[outs]
   return(outs)
 }
+
 aftereffect=function(nremoval,optionalitem,delete,age,scores) {
-  start=Sys.time(); finished=F
   tn=choose(length(optionalitem),nremoval)/390
-  print(paste("Approximate calculation time is",tn,"min.", sep=" "))
-  if (tn>60) {print("Warning: it will take HOURS to get your result")
-  }else if (tn>10) {print("Go grab a coffee while I work for you")}  
-  
   x=combn(optionalitem,nremoval); n=1; 
   eff=matrix(nrow=dim(x)[2],ncol=(length(unique(age))+1))
   drop=rep(NA,dim(x)[2]);
   for (n in c(1:dim(x)[2])) {
     aaa=x[,n]
-    drop[n]=str_c(as.character(aaa),collapse=" ")
+    drop[n]=str_c(c(as.character(delete),as.character(aaa)),collapse=" ")
     ### total alpha ####
-    eff[n,1]=alpha(scores[,c(-c(aaa,delete))])$total$std.alpha
+    eff[n,1]=alpha(scores[,! names(scores) %in% c(delete,aaa)])$total$std.alpha
     ### alpha per age group ####
-    eff[n,2:(length(unique(age))+1)]=abyage(age,scores[,c(-c(aaa,delete))])
+    ss.k<-split(scores[,! names(scores) %in% c(delete,aaa)],age)
+    eff[n,2:(length(unique(age))+1)]=sapply(ss.k, FUN=rel)
   }
   
   eff=data.frame(eff);eff=data.frame(drop,eff); 
   eff=eff[order(drop),]
   colnames(eff)[2]="overall"
-  colnames(eff)[3:ncol(eff)]=str_c("age",c(1:length(unique(age))))
-  end=Sys.time()
-  finished=T
+  colnames(eff)[3:ncol(eff)]=unique(age)
+
   return(eff)
 }
 
@@ -86,7 +82,7 @@ ui=shinyUI(navbarPage('Toolbox',
                                  sidebarPanel(
                                    numericInput('age_c','Which age group you want to check case for?',value='1'),
                                    numericInput('change','Threshold value',value='0.005'),
-                                   actionButton("check","Check Case")  
+                                   actionButton("check","Check Case",icon='check')  
                                  ),
                                  mainPanel(
                                    htmlOutput('outl'),
@@ -101,9 +97,9 @@ ui=shinyUI(navbarPage('Toolbox',
                                    numericInput('ndrop','Total # of items to drop',value=0)),
                                div(style='display:inline-block',
                                    selectizeInput('keyclin','Specify key clinical groups',choices='',multi=T,width='200px')),
-                               actionButton('log','Show sensitive items',icon=icon('star')),
+                               tags$br(),actionButton('log','Show sensitive items',icon=icon('star')),
                                htmlOutput('logreg'),
-                               h5('Items to keep'),
+                               tags$hr(),h4('Items to keep'),
                                div(style='display:inline-block',
                                    selectizeInput('k1','Starting items',choices='',multi=T, width='200px')),
                                div(style='display:inline-block',
@@ -112,7 +108,7 @@ ui=shinyUI(navbarPage('Toolbox',
                                    selectizeInput('k3','Ceiling items',choices='',multi=T,width='200px')),
                                div(style='display:inline-block',
                                    selectizeInput('k4','Critical items',choices='',multi=T,width='200px')),
-                               h5('Items to drop'),
+                               h4('Items to drop'),
                                div(style='display:inline-block',
                                    selectizeInput('d1','Redundant items',choices='',multi=T,width='200px')),
                                div(style='display:inline-block',
@@ -122,12 +118,16 @@ ui=shinyUI(navbarPage('Toolbox',
                                div(style='display:inline-block',
                                    selectizeInput('d4','Other drops',choices='',multi=T,width='200px')),
                                tags$br(),
-                               div(style="display:inline-block",actionButton("est","Estimate time")),
-                               div(style="display:inline-block",actionButton("cal","Calculate")),
+                               div(style="display:inline-block",actionButton("est","Estimate time",icon=icon('clock-o'))),
+                               div(style="display:inline-block",actionButton("cal","Calculate",icon=icon('calculator'))),
                                ####### display results #####
                                textOutput('estim'),
-                               dataTableOutput('sol')
+                               textOutput('finish')
                       ),
+                      tabPanel('Display solutions',
+                               downloadButton('d.sl','Download results'),
+                               dataTableOutput('top.sl')
+                               ),
                       navbarMenu('Score change',
                                  tabPanel('code-based'),
                                  tabPanel('teid-based',
@@ -216,7 +216,7 @@ server<-shinyServer(function(input, output, session) {
       row.names(tt)<-c("N","Ave raw score","Effective items","Min raw score","Max raw score","alpha")
       tt<-tt[,mixedorder(colnames(tt))]
       tt
-    })  	
+    })    
   })
   ##### Check case tab: check outlier ####
   #### check outlier ####
@@ -245,7 +245,7 @@ server<-shinyServer(function(input, output, session) {
     dx[id() %in% check.o(),]
   })
   #### Item select tab: calculate critical item ####
-
+  
   k1<-reactive({ input$k1 })
   k2<-reactive({ input$k2 })
   k3<-reactive({ input$k3 })
@@ -282,7 +282,7 @@ server<-shinyServer(function(input, output, session) {
   output$logreg<-renderText({
     if (input$log==0 | is.null(input$log)) return() 
     vv=""
-    nl<-dim(fvars())[1]
+    nl<-length(fvars())
     for (i in c(1:nl)){
       kk<-str_c(fvars()[[i]],collapse=" ")
       vv=paste(vv, "Following variables are highly sensitive differentiating ",key.clin()[i]," from non-clinicals.<br/>",kk,'<br/>',sep="")
@@ -295,14 +295,14 @@ server<-shinyServer(function(input, output, session) {
     ## figure out item pairs whose correlation is higher than .6
     ps<-paste(r,c); ps<-str_c(ps,collapse="),(")
     vv<-paste(vv,"The following item pairs has a correlation higher than 0.6: <br/>(", ps,
-      ") <br/> Check for possible redundancy.",sep="")
+              ") <br/> Check for possible redundancy.",sep="")
     HTML(vv)
   })
   #### Item select tab: estimate calc time ####
   etime <- eventReactive(input$est, {
-    ntot<-ntot()-length(keeps())
-    ndel<-ndrop()-length(drops())
-    choose(ntot,ndel)
+    nt<-ntot()-length(keeps())
+    nd<-ndrop()-length(drops())
+    choose(nt,nd)
   })
   mins<- reactive({etime()/400})
   output$estim<-renderText({
@@ -324,6 +324,25 @@ server<-shinyServer(function(input, output, session) {
     }
   })
   #### Item select Tab: calculate solutions ####
+  allkeeps<-reactive({ unique(unlist(fvars(),keeps())) })
+  kindrops<-reactive({ sum(allkeeps() %in% drops) })
+  newkeeps<-reactive({ allkeeps()[!allkeeps %in% drops]})
+  eff<-eventReactive(input$cal, {
+    d<-scores(); nitem<-dim(d)[2]
+    optionalitem<-names(d)[!(names(d) %in% c(allkeeps(),drops()))]
+    nt<-ntot()-length(newkeeps())
+    nd<-ndrop()-length(drops)
+    aa<-age(); aa[isclin()]=clingrp()[isclin()]
+    aftereffect(nd,optionalitem,drops(),aa,scores())
+  })
+  output$top.sl<-renderDataTable({
+    eff()
+  })
+  #### download item selection solution ####
+  output$d.sl<-downloadHandler({
+    filename<-paste("ItemSelection_",format(Sys.Date(),"%b_%d_%Y"),".csv",sep="")
+    write.csv(eff(),filename)
+  })
   ##### Score change tab: dynamic UI ######
   output$multiInputs<-renderUI({
     if (is.null(input$tch) | input$tch==0) return()
