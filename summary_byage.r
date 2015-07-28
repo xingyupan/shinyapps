@@ -32,26 +32,28 @@ aftereffect=function(nremoval,optionalitem,delete,age,scores) {
   tn=choose(length(optionalitem),nremoval)/390
   x=combn(optionalitem,nremoval); n=1; 
   eff=matrix(nrow=dim(x)[2],ncol=(length(unique(age))+1))
-  drop=rep(NA,dim(x)[2]);
+  drop=rep(NA,dim(x)[2])
   for (n in c(1:dim(x)[2])) {
     aaa=x[,n]
     drop[n]=str_c(c(as.character(delete),as.character(aaa)),collapse=" ")
     ### total alpha ####
-    eff[n,1]=alpha(scores[,! names(scores) %in% c(delete,aaa)])$total$std.alpha
+    eff[n,1]=alpha(scores[,(!names(scores) %in% c(delete,aaa))])$total$std.alpha
     ### alpha per age group ####
-    ss.k<-split(scores[,! names(scores) %in% c(delete,aaa)],age)
+    ss.k<-split(scores[,(!names(scores) %in% c(delete,aaa))],age)
     eff[n,2:(length(unique(age))+1)]=sapply(ss.k, FUN=rel)
   }
-  
   eff=data.frame(eff);eff=data.frame(drop,eff); 
   eff=eff[order(drop),]
   colnames(eff)[2]="overall"
-  colnames(eff)[3:ncol(eff)]=unique(age)
-
+  colnames(eff)[3:ncol(eff)]=names(table(age))
+  eff[,2:ncol(eff)]=round(eff[,2:ncol(eff)],3)
+  eff<-eff[,c(1,2,mixedorder(names(table(age)))+2)]
+  ####may need to adjust item order here
   return(eff)
 }
 
 library(shiny)
+library(psych)
 library(stringr)
 library(gtools)
 udata=NULL
@@ -82,7 +84,7 @@ ui=shinyUI(navbarPage('Toolbox',
                                  sidebarPanel(
                                    numericInput('age_c','Which age group you want to check case for?',value='1'),
                                    numericInput('change','Threshold value',value='0.005'),
-                                   actionButton("check","Check Case",icon='check')  
+                                   actionButton("check","Check Case",icon=icon("search"))  
                                  ),
                                  mainPanel(
                                    htmlOutput('outl'),
@@ -126,19 +128,22 @@ ui=shinyUI(navbarPage('Toolbox',
                       ),
                       tabPanel('Display solutions',
                                downloadButton('d.sl','Download results'),
-                               dataTableOutput('top.sl')
-                               ),
+                               div(style="padding:5px 0px",dataTableOutput('top.sl'))
+                      ),
                       navbarMenu('Score change',
                                  tabPanel('code-based'),
                                  tabPanel('teid-based',
                                           fluidRow(
                                             div(style='padding:0px 5px', h4('Conduct Change')),
-                                            div(style="display:inline-block; padding:0px 10px",actionButton("tch","add")),
-                                            div(style="display:inline-block",actionButton("tch_rm","remove")),
+                                            div(style="display:inline-block; padding:0px 10px",actionButton("tch","add",icon=icon("plus"))),
+                                            div(style="display:inline-block",actionButton("tch_rm","remove",icon=icon('minus'))),
                                             htmlOutput("multiInputs") 
                                           ),
                                           fluidRow(
-                                            div(style='padding:0px 5px',h4('Effect'))
+                                            div(style='padding:0px 5px',h4('Effect')),
+                                            div(style='padding:0px 5px',actionButton('id_c',"Check effect",icon=icon('calculator'))),
+                                            tableOutput('id_eff'),
+                                            div(style='padding:5px 5px',downloadButton('d.id_c','Download change log'))
                                           )
                                  )
                       )
@@ -159,6 +164,7 @@ server<-shinyServer(function(input, output, session) {
       read.csv(inFile()$datapath,header=T,stringsAsFactors=F)
     }
   })
+  #### update dropdown menu choices ####
   observe({
     updateSelectInput(session, 'teid', choices=names(udata()))
     updateSelectInput(session, 'age', choices=names(udata()))
@@ -250,7 +256,7 @@ server<-shinyServer(function(input, output, session) {
   k2<-reactive({ input$k2 })
   k3<-reactive({ input$k3 })
   k4<-reactive({ input$k4 })
-  d1 <- reactive({ input$d1 })
+  d1 <-reactive({ input$d1 })
   d2<- reactive({ input$d2 })
   d3<-reactive({input$d3})
   d4<-reactive({input$d4})
@@ -267,18 +273,17 @@ server<-shinyServer(function(input, output, session) {
       y<-as.character(clingrp())
       y[is.na(y)]="Non"
       y[!y %in% c(clinx,"Non")]=NA
-      logi.non<-glm(as.factor(y)~1, family=binomial, data=scores())
-      logi.full<-glm(as.factor(y)~., family=binomial, data=scores())
-      both<-step(logi.non,scope=list(lower=formula(logi.non),upper=formula(logi.full)),
-                 direction='both',trace=0)
+      logi.non<-suppressWarnings(glm(as.factor(y)~1, family=binomial, data=scores()))
+      logi.full<-suppressWarnings(glm(as.factor(y)~., family=binomial, data=scores()))
+      both<-suppressWarnings(step(logi.non,scope=list(lower=formula(logi.non),upper=formula(logi.full)),
+                                  direction='both',trace=0))
       flog<-formula(both)
       flog<-as.character(flog)[3]
       ff<-strsplit(flog," [+] ")[[1]]
       x[[i]]<-ff
     }
-    print(x)
     x
-  })
+  }) ## producing a list
   output$logreg<-renderText({
     if (input$log==0 | is.null(input$log)) return() 
     vv=""
@@ -293,6 +298,7 @@ server<-shinyServer(function(input, output, session) {
     r<-all %/% n +1
     c<- all %% n; c[c==0]=n; r[c==n]=r[c==n]-1
     ## figure out item pairs whose correlation is higher than .6
+    r<-names(scores())[r]; c<-names(scores())[c]
     ps<-paste(r,c); ps<-str_c(ps,collapse="),(")
     vv<-paste(vv,"The following item pairs has a correlation higher than 0.6: <br/>(", ps,
               ") <br/> Check for possible redundancy.",sep="")
@@ -323,26 +329,36 @@ server<-shinyServer(function(input, output, session) {
             "items. It will take approximately",mins(),"min to calculate all solutions")
     }
   })
+  
   #### Item select Tab: calculate solutions ####
-  allkeeps<-reactive({ unique(unlist(fvars(),keeps())) })
-  kindrops<-reactive({ sum(allkeeps() %in% drops) })
-  newkeeps<-reactive({ allkeeps()[!allkeeps %in% drops]})
+  kindrops<-reactive({ sum(keeps() %in% drops()) })
+  newkeeps<-reactive({ keeps()[!keeps() %in% drops()]})
   eff<-eventReactive(input$cal, {
     d<-scores(); nitem<-dim(d)[2]
-    optionalitem<-names(d)[!(names(d) %in% c(allkeeps(),drops()))]
+    optionalitem<-names(d)[!(names(d) %in% c(keeps(),drops()))]
     nt<-ntot()-length(newkeeps())
-    nd<-ndrop()-length(drops)
+    nd<-ndrop()-length(drops())
     aa<-age(); aa[isclin()]=clingrp()[isclin()]
+    print(nd)
+    print(optionalitem)
+    print(names(scores()))
+    print(drops())
     aftereffect(nd,optionalitem,drops(),aa,scores())
   })
   output$top.sl<-renderDataTable({
     eff()
   })
-  #### download item selection solution ####
-  output$d.sl<-downloadHandler({
-    filename<-paste("ItemSelection_",format(Sys.Date(),"%b_%d_%Y"),".csv",sep="")
-    write.csv(eff(),filename)
+  output$finish<-renderText({
+    if (is.null(eff())) return()
+    HTML("Calculation finished. Check Display solution tab for results.")
   })
+  #### download item selection solution ####
+  output$d.sl<-downloadHandler(
+    filename<-function() {
+      paste("ItemSelection_",format(Sys.Date(),"%b_%d_%Y"),".csv",sep="")},
+    content=function(file) {
+      write.csv(eff(),file, row.names=F) }
+  )
   ##### Score change tab: dynamic UI ######
   output$multiInputs<-renderUI({
     if (is.null(input$tch) | input$tch==0) return()
@@ -360,11 +376,62 @@ server<-shinyServer(function(input, output, session) {
                div(style="display:inline-block;width:100px; vertical-align:top",
                    numericInput(paste('tch_score',i,sep=''),label='Score',value=input[[sprintf('tch_score%d',i)]])),
                div(style="display:inline-block",
-                   selectizeInput(paste('tch_id',i,sep=''),label='TEID',choices=id(),multi=T,selected=input[[sprintf('tch_id%d',i)]])),
-               '<br/>')
+                   selectizeInput(paste('tch_id',i,sep=''),label='TEID',choices=id(),multi=T,selected=input[[sprintf('tch_id%d',i)]])))
+      if (i %%2 ==0) w<-paste(w,"<br/>")
     }
     HTML(w)
   })
+  #### score change tab: calculate effect of change ####
+  output$id_eff<-renderTable({
+    if (is.null(input$id_c) | (input$id_c==0)) return(NULL)
+    isolate({
+      nscores<-scores()
+      if (is.null(input$tch_rm)| input$tch_rm==0) {
+        nch=input$tch
+      } else {
+        nch=input$tch-input$tch_rm
+      }
+      if (nch>0) {
+        for (i in c(1:nch)) {
+          item<-input[[sprintf("tch_item%d",i)]]
+          s<-input[[sprintf("tch_score%d",i)]]
+          ids<-input[[sprintf("tch_id%d",i)]]
+          nscores[id() %in% ids,item]=s
+        }
+        aa<-age(); aa[isclin()]=clingrp()[isclin()]
+        n.k<-split(nscores,aa)
+        s.k<-split(scores(),aa)
+        r0<-sapply(s.k,FUN=rel) ## calc reliability of orginal
+        r1<-sapply(n.k,FUN=rel) ## calc reliability of new
+        rch<-r1-r0  
+        rtable<-rbind(r0,r1,rch)
+        rtable<-as.data.frame(rtable)
+        colnames(rtable)<-names(table(aa))
+        rtable<-rtable[,mixedorder(names(table(aa)))]
+        row.names(rtable)=c("original","current","change")
+        rtable<-round(rtable,2)
+        rtable
+      }
+    })
+  })
+  id_change_summary<-reactive({
+    nch=input$tch-input$tch_rm
+    items<-NULL;ss<-NULL;ids<-NULL;
+    for (i in c(1:nch)) {
+      items<-c(items,input[[sprintf("tch_item%d",i)]])
+      ss<-c(ss,input[[sprintf("tch_score%d",i)]])
+      idx<-str_c(input[[sprintf("tch_id%d",i)]], collapse=" ")
+      ids<-c(ids,idx)
+    }
+    data.frame(items,score=ss,ids)
+  })
+  
+  output$d.id_c<-downloadHandler(
+    filename<-function() {
+      paste("TEID_ScoreChange_",format(Sys.Date(),"%b_%d_%Y"),".csv",sep="")},
+    content<-function(file) {
+      write.csv(id_change_summary(),file,row.names=F)}
+  )
   
   ##### Score change tab: display score change effect ####
 })
